@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bank Statement Converter</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-labelledby="page-title">
+        <div class="topbar">
+          <div>
+            <h1 id="page-title">Bank Statement Converter</h1>
+            <p>Upload sổ phụ ngân hàng, tải về file ERP_Import.xlsx đúng template.</p>
+          </div>
+        </div>
+
+        <form id="upload-form" class="upload-panel">
+          <label id="drop-zone" class="drop-zone" for="file-input">
+            <span class="upload-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32">
+                <path d="M12 16V4m0 0 4.5 4.5M12 4 7.5 8.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+            </span>
+            <strong>Chọn hoặc kéo file Excel vào đây</strong>
+            <span>Hỗ trợ Excel và ảnh bảng: .xlsx, .xls, .png, .jpg, .jpeg.</span>
+          </label>
+          <input id="file-input" name="files" type="file" accept=".xls,.xlsx,.png,.jpg,.jpeg,.webp,.bmp,image/*" multiple />
+
+          <div class="file-list" aria-live="polite">
+            <div class="file-list-header">
+              <span>File đã chọn</span>
+              <button type="button" id="clear-button">Xóa</button>
+            </div>
+            <ul id="selected-files">
+              <li class="empty">Chưa có file nào.</li>
+            </ul>
+          </div>
+
+          <button id="convert-button" class="primary-button" type="submit" disabled>
+            Convert và tải file output
+          </button>
+        </form>
+
+        <div id="status" class="status" role="status"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

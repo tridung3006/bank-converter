@@ -1,0 +1,20 @@
+{
+  "name": "bank-converter-app",
+  "version": "1.0.0",
+  "description": "Local bank statement to ERP import template converter",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "sharp": "^0.34.5",
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

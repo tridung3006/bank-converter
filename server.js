@@ -45,6 +45,8 @@ const POS_FEE_DESCRIPTION = "Phí cà thẻ POS";
 const POS_FEE_VAT_DESCRIPTION = "Thuế phí cà thẻ POS";
 const TECH_FEE_INTEREST_DESCRIPTION = "Phí, lãi techcombank";
 const TECH_TAX_DESCRIPTION = "Thuế";
+const BIDV_TRANSFER_FEE_DESCRIPTION = "Phí chuyển tiền";
+const BIDV_TRANSFER_FEE_VAT_DESCRIPTION = "Thuế chuyển tiền";
 const EXCEL_COUNTERPART_ACCOUNTS = {
   debitWhenBankCredit: "331111",
   creditWhenBankDebit: "131111",
@@ -539,8 +541,8 @@ function convertBIDV(sheet) {
   const output = [];
   const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
   const firstDataRow = 12; // Excel row 13, zero-based.
-  let posGrossTotal = 0;
-  let posTransactionDate = "";
+  const posGrossTotalsByDate = new Map();
+  const feeTotalsByDate = new Map();
 
   for (let rowIndex = firstDataRow; rowIndex <= range.e.r; rowIndex += 1) {
     const transactionDate = parseDate(cellValue(sheet, rowIndex, 2));
@@ -554,10 +556,9 @@ function convertBIDV(sheet) {
 
     if (debitAmount !== 0) {
       if (hasPOS(description)) {
-        posGrossTotal += Math.abs(debitAmount);
-        if (!posTransactionDate) {
-          posTransactionDate = transactionDate;
-        }
+        addToDateTotal(posGrossTotalsByDate, transactionDate, Math.abs(debitAmount));
+      } else if (hasFEE(description)) {
+        addToDateTotal(feeTotalsByDate, transactionDate, Math.abs(debitAmount));
       } else {
         output.push(...createVoucherRows(transactionDate, description, Math.abs(debitAmount), BIDV_BANK_ACCOUNT, "credit"));
       }
@@ -566,8 +567,22 @@ function convertBIDV(sheet) {
     }
   }
 
-  if (posGrossTotal > 0) {
-    output.push(...createBIDVPosVoucherRows(posTransactionDate, posGrossTotal));
+  for (const [transactionDate, grossAmount] of posGrossTotalsByDate) {
+    output.push(...createBIDVGrossFeeTaxRows(
+      transactionDate,
+      grossAmount,
+      POS_FEE_DESCRIPTION,
+      POS_FEE_VAT_DESCRIPTION,
+    ));
+  }
+
+  for (const [transactionDate, grossAmount] of feeTotalsByDate) {
+    output.push(...createBIDVGrossFeeTaxRows(
+      transactionDate,
+      grossAmount,
+      BIDV_TRANSFER_FEE_DESCRIPTION,
+      BIDV_TRANSFER_FEE_VAT_DESCRIPTION,
+    ));
   }
 
   return output;
@@ -579,9 +594,8 @@ function convertTECH(sheet, bankAccount) {
   const firstDataRow = 21; // Excel row 22, zero-based.
   let posFeeTotal = 0;
   let posTransactionDate = "";
-  let feeInterestTotal = 0;
-  let taxTotal = 0;
-  let feeTaxTransactionDate = "";
+  const feeInterestTotalsByDate = new Map();
+  const taxTotalsByDate = new Map();
 
   for (let rowIndex = firstDataRow; rowIndex <= range.e.r; rowIndex += 1) {
     const transactionDate = parseDate(cellValue(sheet, rowIndex, 1));
@@ -596,11 +610,8 @@ function convertTECH(sheet, bankAccount) {
     }
 
     if (feeInterestAmount !== 0 || taxAmount !== 0) {
-      if (!feeTaxTransactionDate) {
-        feeTaxTransactionDate = transactionDate;
-      }
-      feeInterestTotal += feeInterestAmount;
-      taxTotal += taxAmount;
+      addToDateTotal(feeInterestTotalsByDate, transactionDate, feeInterestAmount);
+      addToDateTotal(taxTotalsByDate, transactionDate, taxAmount);
     }
 
     if (debitAmount !== 0 || creditAmount !== 0) {
@@ -623,12 +634,24 @@ function convertTECH(sheet, bankAccount) {
     output.push(...createVoucherRows(posTransactionDate, POS_FEE_DESCRIPTION, posFeeTotal, bankAccount, "credit"));
   }
 
-  if (feeInterestTotal > 0) {
-    output.push(...createDebitBankCreditRows(feeTaxTransactionDate, TECH_FEE_INTEREST_DESCRIPTION, feeInterestTotal, POS_EXPENSE_ACCOUNT, bankAccount));
+  for (const [transactionDate, amount] of feeInterestTotalsByDate) {
+    output.push(...createDebitBankCreditRows(
+      transactionDate,
+      withDateSuffix(TECH_FEE_INTEREST_DESCRIPTION, transactionDate),
+      amount,
+      POS_EXPENSE_ACCOUNT,
+      bankAccount,
+    ));
   }
 
-  if (taxTotal > 0) {
-    output.push(...createDebitBankCreditRows(feeTaxTransactionDate, TECH_TAX_DESCRIPTION, taxTotal, VAT_INPUT_ACCOUNT, bankAccount));
+  for (const [transactionDate, amount] of taxTotalsByDate) {
+    output.push(...createDebitBankCreditRows(
+      transactionDate,
+      withDateSuffix(TECH_TAX_DESCRIPTION, transactionDate),
+      amount,
+      VAT_INPUT_ACCOUNT,
+      bankAccount,
+    ));
   }
 
   return output;
@@ -685,14 +708,14 @@ function createVoucherRows(
   ];
 }
 
-function createBIDVPosVoucherRows(transactionDate, grossAmount) {
+function createBIDVGrossFeeTaxRows(transactionDate, grossAmount, feeDescription, taxDescription) {
   const netAmount = Math.round(grossAmount / 1.1);
   const vatAmount = grossAmount - netAmount;
 
   return [
-    [transactionDate, JOURNAL_BANK_DEBIT, POS_FEE_DESCRIPTION, "", "", "", BIDV_BANK_ACCOUNT, "", netAmount],
+    [transactionDate, JOURNAL_BANK_DEBIT, withDateSuffix(feeDescription, transactionDate), "", "", "", BIDV_BANK_ACCOUNT, "", netAmount],
     ["", "", "", "", "", "", POS_EXPENSE_ACCOUNT, netAmount, ""],
-    [transactionDate, JOURNAL_BANK_DEBIT, POS_FEE_VAT_DESCRIPTION, "", "", "", VAT_INPUT_ACCOUNT, vatAmount, ""],
+    [transactionDate, JOURNAL_BANK_DEBIT, withDateSuffix(taxDescription, transactionDate), "", "", "", VAT_INPUT_ACCOUNT, vatAmount, ""],
     ["", "", "", "", "", "", BIDV_BANK_ACCOUNT, "", vatAmount],
   ];
 }
@@ -706,6 +729,32 @@ function createDebitBankCreditRows(transactionDate, description, amount, debitAc
 
 function hasPOS(description) {
   return /\bPOS\b/i.test(String(description || ""));
+}
+
+function hasFEE(description) {
+  return /\bFEE\b/i.test(String(description || ""));
+}
+
+function addToDateTotal(totalsByDate, transactionDate, amount) {
+  if (!transactionDate || amount === 0) {
+    return;
+  }
+
+  totalsByDate.set(transactionDate, (totalsByDate.get(transactionDate) || 0) + amount);
+}
+
+function withDateSuffix(description, transactionDate) {
+  return `${description} ${formatDisplayDate(transactionDate)}`;
+}
+
+function formatDisplayDate(transactionDate) {
+  const match = String(transactionDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (!match) {
+    return transactionDate;
+  }
+
+  return `${Number(match[3])}-${Number(match[2])}-${match[1]}`;
 }
 
 function cellValue(sheet, rowIndex, columnIndex) {

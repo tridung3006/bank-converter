@@ -40,6 +40,7 @@ const TECH_BANK_ACCOUNTS = {
   TECH588: "112114",
 };
 const POS_EXPENSE_ACCOUNT = "641521";
+const BIDV_TRANSFER_FEE_ACCOUNT = "642521";
 const VAT_INPUT_ACCOUNT = "133111";
 const POS_FEE_DESCRIPTION = "Phí cà thẻ POS";
 const POS_FEE_VAT_DESCRIPTION = "Thuế phí cà thẻ POS";
@@ -49,6 +50,11 @@ const BIDV_TRANSFER_FEE_DESCRIPTION = "Phí chuyển tiền";
 const BIDV_TRANSFER_FEE_VAT_DESCRIPTION = "Thuế chuyển tiền";
 const EXCEL_COUNTERPART_ACCOUNTS = {
   debitWhenBankCredit: "331111",
+  creditWhenBankDebit: "131111",
+  posDebitWhenBankCredit: POS_EXPENSE_ACCOUNT,
+};
+const VTTT_COUNTERPART_ACCOUNTS = {
+  debitWhenBankCredit: "331119",
   creditWhenBankDebit: "131111",
   posDebitWhenBankCredit: POS_EXPENSE_ACCOUNT,
 };
@@ -674,9 +680,9 @@ function convertVTTT(sheet) {
     }
 
     if (debitAmount !== 0) {
-      output.push(...createVoucherRows(transactionDate, description, debitAmount, VTTT_BANK_ACCOUNT, "credit"));
+      output.push(...createVoucherRows(transactionDate, description, debitAmount, VTTT_BANK_ACCOUNT, "credit", VTTT_COUNTERPART_ACCOUNTS));
     } else {
-      output.push(...createVoucherRows(transactionDate, description, creditAmount, VTTT_BANK_ACCOUNT, "debit"));
+      output.push(...createVoucherRows(transactionDate, description, creditAmount, VTTT_BANK_ACCOUNT, "debit", VTTT_COUNTERPART_ACCOUNTS));
     }
   }
 
@@ -711,10 +717,11 @@ function createVoucherRows(
 function createBIDVGrossFeeTaxRows(transactionDate, grossAmount, feeDescription, taxDescription) {
   const netAmount = Math.round(grossAmount / 1.1);
   const vatAmount = grossAmount - netAmount;
+  const feeAccount = feeDescription === BIDV_TRANSFER_FEE_DESCRIPTION ? BIDV_TRANSFER_FEE_ACCOUNT : POS_EXPENSE_ACCOUNT;
 
   return [
     [transactionDate, JOURNAL_BANK_DEBIT, withDateSuffix(feeDescription, transactionDate), "", "", "", BIDV_BANK_ACCOUNT, "", netAmount],
-    ["", "", "", "", "", "", POS_EXPENSE_ACCOUNT, netAmount, ""],
+    ["", "", "", "", "", "", feeAccount, netAmount, ""],
     [transactionDate, JOURNAL_BANK_DEBIT, withDateSuffix(taxDescription, transactionDate), "", "", "", VAT_INPUT_ACCOUNT, vatAmount, ""],
     ["", "", "", "", "", "", BIDV_BANK_ACCOUNT, "", vatAmount],
   ];

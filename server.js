@@ -6,6 +6,7 @@ const os = require("node:os");
 const XLSX = require("xlsx");
 const { createWorker } = require("tesseract.js");
 const sharp = require("sharp");
+const { PDFParse } = require("pdf-parse");
 
 const app = express();
 const upload = multer({
@@ -28,6 +29,7 @@ const OUTPUT_HEADERS = [
   "Chi tiết bút toán/Tài khoản",
   "Chi tiết bút toán/Nợ",
   "Chi tiết bút toán/Có",
+  "Khế ước",
 ];
 
 const DEFAULT_BANK_ACCOUNT = "112";
@@ -61,6 +63,11 @@ const VTTT_COUNTERPART_ACCOUNTS = {
 const IMAGE_COUNTERPART_ACCOUNTS = {
   debitWhenBankCredit: "641231",
   creditWhenBankDebit: "113112",
+};
+const PG_BANK_PDF_MARKER = "Ngân hàng TMCP Thịnh vượng và Phát triển";
+const PDF_COUNTERPART_ACCOUNTS = {
+  debitWhenBankCredit: "641231",
+  creditWhenBankDebit: "641231",
 };
 const JOURNAL_BANK_CREDIT = "Ngân hàng - Báo Có";
 const JOURNAL_BANK_DEBIT = "Ngân hàng - Báo Nợ";
@@ -101,6 +108,7 @@ app.post("/convert", upload.array("files"), async (req, res) => {
       { wch: 24 },
       { wch: 18 },
       { wch: 18 },
+      { wch: 18 },
     ];
 
     XLSX.utils.book_append_sheet(outputBook, outputSheet, "ERP_Import");
@@ -128,6 +136,10 @@ app.listen(PORT, () => {
 });
 
 async function convertUploadedFile(file) {
+  if (isPdfUpload(file)) {
+    return convertPdfFile(file);
+  }
+
   if (isImageUpload(file)) {
     return convertImageFile(file);
   }
@@ -141,9 +153,48 @@ async function convertUploadedFile(file) {
   return convertWorkbook(workbook, file.originalname);
 }
 
+function isPdfUpload(file) {
+  const name = file.originalname.toLowerCase();
+  return file.mimetype === "application/pdf" || /\.pdf$/i.test(name);
+}
+
 function isImageUpload(file) {
   const name = file.originalname.toLowerCase();
   return file.mimetype.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(name);
+}
+
+async function convertPdfFile(file) {
+  const parser = new PDFParse({ data: file.buffer });
+  let parsedText = "";
+
+  try {
+    const parsed = await parser.getText();
+    parsedText = parsed.text || "";
+  } finally {
+    await parser.destroy();
+  }
+
+  const parsedRows = parsePdfStatementRows(parsedText);
+  const rows = convertParsedDbCrRows(parsedRows, IMAGE_BANK_ACCOUNT, PDF_COUNTERPART_ACCOUNTS);
+  if (parsedText.includes(PG_BANK_PDF_MARKER)) {
+    fillAnalyticColumns(rows, "PG Bank", "Supply Chain", "PG Bank");
+  }
+
+  return {
+    rows,
+    summary: {
+      fileName: file.originalname,
+      sheets: [
+        {
+          sheetName: "PDF_STATEMENT",
+          outputRows: rows.length,
+          mode: "PDF_TEXT_DB_CR",
+          detectedRows: parsedRows.length,
+        },
+      ],
+      outputRows: rows.length,
+    },
+  };
 }
 
 async function convertImageFile(file) {
@@ -392,6 +443,89 @@ function convertDbCrText(text, bankAccount = DEFAULT_BANK_ACCOUNT, counterpartAc
   };
 }
 
+function parsePdfStatementRows(text) {
+  const records = splitPdfStatementRecords(text);
+  const rows = [];
+
+  for (const record of records) {
+    const compactRecord = cleanText(record);
+    const base = compactRecord.match(/^(\d+)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(.+)$/);
+
+    if (!base) {
+      continue;
+    }
+
+    const date = parseDate(base[2]);
+    const rest = base[3];
+    const debitMatch = rest.match(/^([\d.,]+)(.+)$/);
+
+    if (debitMatch && isLikelyMoney(debitMatch[1])) {
+      const amount = Math.abs(toNumber(debitMatch[1]));
+      const description = cleanPdfDescription(debitMatch[2]);
+
+      if (date && amount > 0 && description) {
+        rows.push({ date, dbCr: "D", amount, description });
+      }
+      continue;
+    }
+
+    const amount = extractPdfCreditAmount(rest);
+    const description = cleanPdfDescription(rest);
+
+    if (date && amount > 0 && description) {
+      rows.push({ date, dbCr: "C", amount, description });
+    }
+  }
+
+  return rows;
+}
+
+function splitPdfStatementRecords(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const records = [];
+  let current = "";
+
+  for (const line of lines) {
+    if (/^\d+\s+\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line)) {
+      if (current) {
+        records.push(current);
+      }
+      current = line;
+    } else if (current) {
+      current += ` ${line}`;
+    }
+  }
+
+  if (current) {
+    records.push(current);
+  }
+
+  return records;
+}
+
+function cleanPdfDescription(value) {
+  return cleanText(String(value || "")
+    .replace(/\bFT\d+\S*\b.*$/i, "")
+    .replace(/\s+\d{1,3}(?:,\d{3})+[\d,]*\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{2}:\d{2}:\d{2}.*$/i, "")
+    .replace(/\s+\d{1,3}(?:,\d{3})+(?:\d{1,3}(?:,\d{3})+)?\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{2}:\d{2}:\d{2}.*$/i, "")
+    .replace(/\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{2}:\d{2}:\d{2}.*$/i, "")
+    .replace(/\s+\d{1,3}(?:,\d{3})+$/i, ""));
+}
+
+function extractPdfCreditAmount(value) {
+  const beforeTransactionTime = String(value || "").split(/\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/)[0] || "";
+  const matches = [...beforeTransactionTime.matchAll(/\d{1,3}(?:,\d{3})+/g)].map((match) => match[0]);
+  const lastAmount = matches[matches.length - 1] || "";
+  return Math.abs(toNumber(lastAmount));
+}
+
+function isLikelyMoney(value) {
+  return /^[\d.,]+$/.test(String(value || "")) && toNumber(value) > 0;
+}
+
 function convertParsedDbCrRows(parsedRows, bankAccount = DEFAULT_BANK_ACCOUNT, counterpartAccounts = EXCEL_COUNTERPART_ACCOUNTS) {
   const output = [];
 
@@ -404,6 +538,14 @@ function convertParsedDbCrRows(parsedRows, bankAccount = DEFAULT_BANK_ACCOUNT, c
   }
 
   return output;
+}
+
+function fillAnalyticColumns(rows, partner, department, analyticAccount) {
+  for (const row of rows) {
+    row[3] = partner;
+    row[4] = department;
+    row[5] = analyticAccount;
+  }
 }
 
 function parseDbCrOcrRows(text) {
@@ -563,7 +705,7 @@ function convertBIDV(sheet) {
     if (debitAmount !== 0) {
       if (hasPOS(description)) {
         addToDateTotal(posGrossTotalsByDate, transactionDate, Math.abs(debitAmount));
-      } else if (hasFEE(description)) {
+      } else if (hasBIDVFeeDescription(description)) {
         addToDateTotal(feeTotalsByDate, transactionDate, Math.abs(debitAmount));
       } else {
         output.push(...createVoucherRows(transactionDate, description, Math.abs(debitAmount), BIDV_BANK_ACCOUNT, "credit"));
@@ -740,6 +882,10 @@ function hasPOS(description) {
 
 function hasFEE(description) {
   return /\bFEE\b/i.test(String(description || ""));
+}
+
+function hasBIDVFeeDescription(description) {
+  return /\b(FEE|REF)\b/i.test(String(description || ""));
 }
 
 function addToDateTotal(totalsByDate, transactionDate, amount) {

@@ -36,7 +36,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   if (files.length === 0) {
-    setStatus("Vui lòng chọn ít nhất một file Excel.", "error");
+    setStatus("Vui lòng chọn ít nhất một file.", "error");
     return;
   }
 
@@ -116,7 +116,7 @@ function setStatus(message, type) {
 }
 
 function isExcelFile(file) {
-  return /\.(xlsx|xls|png|jpe?g|webp|bmp)$/i.test(file.name) || file.type.startsWith("image/");
+  return /\.(xlsx|xls|pdf|png|jpe?g|webp|bmp)$/i.test(file.name) || file.type.startsWith("image/") || file.type === "application/pdf";
 }
 
 function formatSize(bytes) {
